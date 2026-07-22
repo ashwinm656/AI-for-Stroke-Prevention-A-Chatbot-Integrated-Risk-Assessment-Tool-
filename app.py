@@ -165,7 +165,7 @@ st.markdown(
     }
 
     .auth-wrap { max-width:420px; margin:60px auto 0 auto; }
-    .auth-brand { text-align:center; color:#fff; font-weight:800; font-size:1.4rem; margin-bottom:24px; }
+    .auth-brand { text-align:center; color:#fff; font-weight:800; font-size:1.6rem; margin-bottom:28px; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -181,6 +181,25 @@ if "auth_user" not in st.session_state:
 # AUTH GATE — sign up / log in before anything else renders
 # ---------------------------------------------------------------------------
 if st.session_state.auth_user is None:
+    st.markdown(
+        """
+        <style>
+        .stApp { background: linear-gradient(160deg, #1c1440, #120c2b) !important; }
+        div[data-testid="stTabs"] button[data-baseweb="tab"] { color:#b9b3d6; font-weight:600; }
+        div[data-testid="stTabs"] button[aria-selected="true"] { color:#f2a93b; }
+        div[data-testid="stTabs"] div[data-baseweb="tab-highlight"] { background-color:#f2a93b; }
+        div[data-testid="stTabs"] div[data-baseweb="tab-border"] { background-color:#ffffff22; }
+        div[data-testid="stForm"] {
+            background:#1c1440; border:1px solid #ffffff18; border-radius:18px; padding:28px 26px;
+        }
+        div[data-testid="stForm"] label p { color:#e8e4fa !important; font-weight:500; }
+        div[data-testid="stForm"] input {
+            background:#120c2b !important; color:#f4f1fb !important; border:1px solid #ffffff22 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
     st.markdown('<div class="auth-wrap"><div class="auth-brand">🧠 NeuroCare</div></div>', unsafe_allow_html=True)
     _, mid, _ = st.columns([1, 1.4, 1])
     with mid:
