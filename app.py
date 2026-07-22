@@ -1,142 +1,496 @@
-import streamlit as st
+import os
 import pickle
-import numpy as np
-import requests
-from hugchat import hugchat
-from hugchat.login import Login
-import base64
 
-# ✅ Set page config FIRST
-st.set_page_config(page_title="Stroke Risk App", layout="wide")
+import streamlit as st
 
-# ✅ Set background image
-def set_background(image_file):
-    with open(image_file, "rb") as file:
-        encoded = base64.b64encode(file.read()).decode()
-    st.markdown(
-        f"""
-        <style>
-        .stApp {{
-            background-image: url("data:image/jpg;base64,{encoded}");
-            background-size: cover;
-            background-position: center;
-            background-repeat: no-repeat;
-            background-attachment: fixed;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
+import db
 
-set_background("bg_image.jpg")  # This comes after set_page_config
+st.set_page_config(page_title="NeuroCare", page_icon="🧠", layout="wide", initial_sidebar_state="expanded")
+db.init_db()
 
-# Sidebar navigation
-page = st.sidebar.selectbox(
-    "Select a Page",
-    ["🏠 Home", "🩺 Stroke Prediction", "📰 Stroke News", "💬 Chatbot"]
+# ---------------------------------------------------------------------------
+# REAL FEATURE SET — must match the column order used in stroke_model.py
+# X = df.drop(['stroke_risk_percentage', 'at_risk'], axis=1)
+# i.e. whatever order stroke_data.csv's columns were in (age, gender, then
+# the 15 symptom columns below). If your CSV has a different column order,
+# reorder SYMPTOMS to match or predictions will be wrong.
+# ---------------------------------------------------------------------------
+SYMPTOMS = [
+    ("chest_pain", "Chest pain"),
+    ("high_blood_pressure", "High blood pressure"),
+    ("irregular_heartbeat", "Irregular heartbeat"),
+    ("shortness_of_breath", "Shortness of breath"),
+    ("fatigue_weakness", "Fatigue or weakness"),
+    ("dizziness", "Dizziness"),
+    ("swelling_edema", "Swelling or edema"),
+    ("neck_jaw_pain", "Neck or jaw pain"),
+    ("excessive_sweating", "Excessive sweating"),
+    ("persistent_cough", "Persistent cough"),
+    ("nausea_vomiting", "Nausea or vomiting"),
+    ("chest_discomfort", "Chest discomfort"),
+    ("cold_hands_feet", "Cold hands / feet"),
+    ("snoring_sleep_apnea", "Snoring / sleep apnea"),
+    ("anxiety_doom", "Anxiety / feeling of doom"),
+]
+
+# Static demo vitals shown on the Dashboard's 4 top cards — matches the
+# inspo screenshot exactly. Your dataset/model doesn't track wearable
+# metrics like heart rate/BP/sleep/steps, so these stay as illustrative
+# sample data unless you wire up a real vitals source later.
+DEMO_VITALS = [
+    {"label": "Heart rate", "value": "72 bpm", "delta": "4%", "dir": "up", "icon": "❤️", "css": "vital-red"},
+    {"label": "Blood pressure", "value": "128/82", "delta": "2%", "dir": "down", "icon": "💧", "css": "vital-green"},
+    {"label": "Sleep", "value": "6.5 hrs", "delta": "8%", "dir": "up", "icon": "🌙", "css": "vital-amber"},
+    {"label": "Steps", "value": "4,210", "delta": "12%", "dir": "up", "icon": "👣", "css": "vital-purple"},
+]
+
+# Sample risk panel shown before the user has run a real assessment —
+# matches the inspo screenshot exactly (78% / Elevated / BP, Glucose, BMI).
+SAMPLE_RISK = {
+    "pct": 78, "label": "Elevated",
+    "factors": [("Blood pressure", "High"), ("Glucose", "High"), ("BMI", "Elevated")],
+    "recs": ["Exercise 30 min", "Reduce sodium", "Consult doctor", "Track weekly"],
+}
+
+RECOMMENDATION_RULES = {
+    "high_blood_pressure": "Monitor blood pressure daily",
+    "fatigue_weakness": "Prioritize rest and sleep",
+    "shortness_of_breath": "Avoid strenuous exertion, consult doctor",
+    "irregular_heartbeat": "Get an ECG checkup",
+    "anxiety_doom": "Consider stress-reduction techniques",
+}
+DEFAULT_RECS = ["Consult a doctor", "Track weekly", "Stay hydrated", "Light daily exercise"]
+
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+@st.cache_resource
+def load_model_and_scaler():
+    model_path = os.path.join(APP_DIR, "stroke_model.pkl")
+    scaler_path = os.path.join(APP_DIR, "scaler.pkl")
+    if not os.path.exists(model_path):
+        return None, None, "missing_model"
+    if not os.path.exists(scaler_path):
+        return None, None, "missing_scaler"
+    with open(model_path, "rb") as f:
+        model = pickle.load(f)
+    with open(scaler_path, "rb") as f:
+        scaler = pickle.load(f)
+    return model, scaler, None
+
+
+def run_prediction(age, gender_val, symptom_values, model, scaler):
+    age_scaled = scaler.transform([[age]])[0][0]
+    input_data = [age_scaled, gender_val] + symptom_values
+    pred = model.predict([input_data])[0]
+    try:
+        proba = model.predict_proba([input_data])[0][1]  # P(at_risk)
+    except Exception:
+        proba = float(pred)
+    return int(pred), round(proba * 100)
+
+
+# ---------------------------------------------------------------------------
+# STYLES  (dark NeuroCare theme)
+# ---------------------------------------------------------------------------
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    :root{
+        --navy-deep:#120c2b; --navy-card2:#1c1440; --accent:#f2a93b;
+        --text-light:#f4f1fb; --text-dim:#b9b3d6;
+    }
+    .stApp { background:#f4f5fa; }
+    .block-container { padding-top:1.5rem; padding-bottom:3rem; max-width:1100px; }
+
+    section[data-testid="stSidebar"] { background:var(--navy-deep); border-right:1px solid #ffffff10; }
+    section[data-testid="stSidebar"] * { color:var(--text-light) !important; }
+    .brand { display:flex; align-items:center; gap:10px; padding:6px 4px 22px 4px; font-weight:800; font-size:1.15rem; }
+
+    section[data-testid='stSidebar'] div[role='radiogroup'] { gap:6px; }
+    section[data-testid='stSidebar'] div[role='radiogroup'] label {
+        padding:11px 14px; border-radius:12px; width:100%; font-weight:500; color:var(--text-dim) !important;
+    }
+    section[data-testid='stSidebar'] div[role='radiogroup'] label:has(input:checked) {
+        background: linear-gradient(90deg, #6a4bd6, #8a5cf0); box-shadow: 0 4px 14px #6a4bd655;
+    }
+    section[data-testid='stSidebar'] div[role='radiogroup'] label:has(input:checked) p { color:#fff !important; font-weight:600; }
+    section[data-testid='stSidebar'] div[role='radiogroup'] input { display:none; }
+
+    .hero { background: linear-gradient(135deg, var(--navy-card2), var(--navy-deep)); border-radius:22px;
+            padding:30px 34px; position:relative; overflow:hidden; margin-bottom:22px; }
+    .hero h1 { color:#fff; font-size:1.9rem; font-weight:800; margin:0 0 14px 0; }
+    .pill { display:inline-flex; align-items:center; gap:6px; background:#ffffff14; color:#e8e4fa;
+            padding:6px 14px; border-radius:999px; font-size:0.85rem; margin-right:10px; font-weight:500; }
+    .hero-icon { position:absolute; right:34px; top:50%; transform:translateY(-50%); width:82px; height:82px;
+                 border-radius:50%; background:#ffffff12; display:flex; align-items:center; justify-content:center; font-size:2.1rem; }
+    .start-btn { display:inline-block; margin-top:20px; background:var(--accent); color:#241505; font-weight:700;
+                 padding:12px 22px; border-radius:12px; font-size:0.95rem; box-shadow:0 6px 18px #f2a93b55;
+                 text-decoration:none; }
+
+    .vital-card { border-radius:18px; padding:20px 20px 16px 20px; height:118px; margin-bottom:20px;
+                  display:flex; flex-direction:column; justify-content:space-between; }
+    .vital-red{background:#3d1c1c;} .vital-green{background:#0f3a2c;} .vital-amber{background:#3a2c0e;} .vital-purple{background:#241a63;}
+    .vital-top { display:flex; align-items:center; justify-content:space-between; }
+    .vital-delta { font-size:0.8rem; font-weight:700; color:#8be3a8; }
+    .vital-value { color:#fff; font-size:1.4rem; font-weight:800; margin-top:4px; }
+    .vital-label { color:#d7d2ec; font-size:0.85rem; margin-top:2px; }
+    .vital-bar { height:4px; border-radius:4px; background:#ffffff25; margin-top:8px; overflow:hidden; }
+    .vital-bar span { display:block; height:100%; border-radius:4px; }
+    .vital-red .vital-bar span { background:#ff8a7a; width:44%; }
+    .vital-green .vital-bar span { background:#5fe3ac; width:72%; }
+    .vital-amber .vital-bar span { background:#f7c04a; width:60%; }
+    .vital-purple .vital-bar span { background:#b8a8ff; width:80%; }
+
+    .risk-panel { background: linear-gradient(135deg, var(--navy-card2), var(--navy-deep)); border-radius:22px; padding:30px 36px; }
+    .risk-panel h3 { color:var(--accent); font-size:1rem; font-weight:700; margin:0 0 14px 0; }
+    .factor-row { display:flex; justify-content:space-between; padding:9px 0; color:#e8e4fa; font-size:0.95rem; border-bottom:1px solid #ffffff10; }
+    .factor-row .lvl-high { color:#ff8a7a; font-weight:700; }
+    .rec-btn { display:block; text-align:center; background:#ffffff14; color:#e8e4fa; padding:11px 10px;
+               border-radius:12px; font-size:0.88rem; font-weight:600; margin-bottom:10px; }
+    .risk-label { color:var(--accent); font-weight:700; text-align:center; margin-top:8px; font-size:1.05rem; }
+
+    .setup-warning { background:#3a2c0e; border-left:4px solid #f2a93b; padding:16px 20px; border-radius:8px; color:#f4f1fb; }
+
+    div[data-testid="stMainBlockContainer"] div[data-testid="stButton"] button,
+    div[data-testid="stMainBlockContainer"] div[data-testid="stFormSubmitButton"] button {
+        background: var(--accent); color:#241505; font-weight:700; border:none;
+        border-radius:12px; padding:10px 22px; box-shadow:0 6px 18px #f2a93b55;
+    }
+    div[data-testid="stMainBlockContainer"] div[data-testid="stButton"] button:hover,
+    div[data-testid="stMainBlockContainer"] div[data-testid="stFormSubmitButton"] button:hover {
+        background:#e39a2c; color:#241505;
+    }
+
+    .auth-wrap { max-width:420px; margin:60px auto 0 auto; }
+    .auth-brand { text-align:center; color:#fff; font-weight:800; font-size:1.4rem; margin-bottom:24px; }
+    </style>
+    """,
+    unsafe_allow_html=True,
 )
 
-# Load model and scaler
-model = pickle.load(open('stroke_model.pkl', 'rb'))
-scaler = pickle.load(open('scaler.pkl', 'rb'))
+# ---------------------------------------------------------------------------
+# SESSION STATE
+# ---------------------------------------------------------------------------
+if "auth_user" not in st.session_state:
+    st.session_state.auth_user = None  # dict: id, username, email
 
-# News API Key
-NEWS_API_KEY = "c886b1766bdc4af69e19811aef4dc9e8"
+# ---------------------------------------------------------------------------
+# AUTH GATE — sign up / log in before anything else renders
+# ---------------------------------------------------------------------------
+if st.session_state.auth_user is None:
+    st.markdown('<div class="auth-wrap"><div class="auth-brand">🧠 NeuroCare</div></div>', unsafe_allow_html=True)
+    _, mid, _ = st.columns([1, 1.4, 1])
+    with mid:
+        tab_login, tab_signup = st.tabs(["Log in", "Sign up"])
 
-# HugChat credentials
-HF_EMAIL = "amreenrafiq10@gmail.com"
-HF_PASS = "v/PkBzwiJdbW@4!"
-BASE_PROMPT = "Hello, I would like to ask about stroke prevention and symptoms. "
-flag = 0
+        with tab_login:
+            with st.form("login_form"):
+                li_user = st.text_input("Username or email")
+                li_pass = st.text_input("Password", type="password")
+                li_submit = st.form_submit_button("Log in", use_container_width=True)
+                if li_submit:
+                    user = db.verify_user(li_user, li_pass)
+                    if user:
+                        st.session_state.auth_user = user
+                        st.rerun()
+                    else:
+                        st.error("Incorrect username/email or password.")
 
-def query_hugchat(prompt_input):
-    global flag
-    sign = Login(HF_EMAIL, HF_PASS)
-    cookies = sign.login()
-    chatbot = hugchat.ChatBot(cookies=cookies.get_dict())
-    if flag < 1:
-        flag += 1
-        prompt_input = BASE_PROMPT + prompt_input
-    return str(chatbot.chat(prompt_input)).strip('`')
+        with tab_signup:
+            with st.form("signup_form"):
+                su_user = st.text_input("Username")
+                su_email = st.text_input("Email")
+                su_pass = st.text_input("Password", type="password")
+                su_pass2 = st.text_input("Confirm password", type="password")
+                su_submit = st.form_submit_button("Create account", use_container_width=True)
+                if su_submit:
+                    if su_pass != su_pass2:
+                        st.error("Passwords don't match.")
+                    else:
+                        user, err = db.create_user(su_user, su_email, su_pass)
+                        if err:
+                            st.error(err)
+                        else:
+                            st.session_state.auth_user = user
+                            st.rerun()
+    st.stop()
 
-if page == "🏠 Home":
-    st.title("Welcome to AI for Stroke Prevention")
-    st.markdown("""
-    This AI-powered application allows users to:
-    - Predict stroke risk using health data  
-    - Read latest stroke-related news  
-    - Chat with a medical assistant powered by Hugging Face  
+user = st.session_state.auth_user
 
-    **Developed by Ashwin Muralidharan**  
-    Masters in Data Science, University of North Texas
-    """)
+# ---------------------------------------------------------------------------
+# SIDEBAR NAV
+# ---------------------------------------------------------------------------
+NAV_OPTIONS = ["🖥️  Dashboard", "🩺  Risk check", "📰  News", "💬  Chatbot"]
+with st.sidebar:
+    st.markdown('<div class="brand"><span>🧠</span> NeuroCare</div>', unsafe_allow_html=True)
+    if "page" not in st.session_state:
+        st.session_state.page = NAV_OPTIONS[0]
+    st.session_state.page = st.radio(
+        "nav", NAV_OPTIONS, index=NAV_OPTIONS.index(st.session_state.page),
+        label_visibility="collapsed", key="nav_radio",
+    )
+    st.markdown("---")
+    st.caption(f"Logged in as **{user['username']}**")
+    if st.button("Log out", key="logout_btn", use_container_width=True):
+        st.session_state.auth_user = None
+        st.session_state.page = NAV_OPTIONS[0]
+        for k in ("messages", "chat_primed"):
+            st.session_state.pop(k, None)
+        st.rerun()
+    st.markdown("---")
+    st.caption("Developed by Ashwin Muralidharan · MS Data Science, UNT")
 
-elif page == "🩺 Stroke Prediction":
-    st.header("Stroke Risk Assessment")
+model, scaler, model_error = load_model_and_scaler()
+
+# ===========================================================================
+# DASHBOARD
+# ===========================================================================
+if st.session_state.page == NAV_OPTIONS[0]:
+    la = db.get_latest_assessment(user["id"])
+    stats = db.get_stats(user["id"])
+
+    top_l, top_r = st.columns([10, 1])
+    with top_l:
+        st.markdown('<div style="background:#fff;border-radius:14px;padding:12px 18px;color:#9b9bb0;border:1px solid #eceaf5;">🔍&nbsp;&nbsp;Search symptoms, reports...</div>', unsafe_allow_html=True)
+    with top_r:
+        st.markdown('<div style="background:#fff;border-radius:14px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:1px solid #eceaf5;position:relative;">🔔<span style="position:absolute;top:9px;right:10px;width:8px;height:8px;background:#e8543f;border-radius:50%;"></span></div>', unsafe_allow_html=True)
+    st.write("")
+
+    if la:
+        last_check_text = la["created_at"][:10]
+        streak_text = f"{stats['count']} check{'s' if stats['count'] != 1 else ''} logged"
+    else:
+        last_check_text = "May 20"
+        streak_text = "7 day streak"
+
+    st.markdown(
+        f"""
+        <div class="hero">
+            <h1>Good morning, {user['username']}</h1>
+            <span class="pill">🗓️ Last check {last_check_text}</span>
+            <span class="pill">🔥 {streak_text}</span>
+            <div class="hero-icon">🧠</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if st.button("✨ Start new assessment", key="start_assessment_btn"):
+        st.session_state.page = NAV_OPTIONS[1]
+        st.rerun()
+
+    if model_error:
+        st.markdown(
+            f"""<div class="setup-warning">⚠️ <b>Model not loaded</b> — {'stroke_model.pkl' if model_error=='missing_model' else 'scaler.pkl'}
+            is missing from the app folder.</div>""",
+            unsafe_allow_html=True,
+        )
+        st.write("")
+
+    # --- 4 vital cards (matches inspo exactly; illustrative demo values —
+    # this dataset doesn't include wearable vitals) ---
+    cols = st.columns(4)
+    for col, v in zip(cols, DEMO_VITALS):
+        arrow = "↗" if v["dir"] == "up" else "↘"
+        with col:
+            st.markdown(
+                f"""<div class="vital-card {v['css']}">
+                    <div class="vital-top"><span>{v['icon']}</span><span class="vital-delta">{arrow} {v['delta']}</span></div>
+                    <div><div class="vital-value">{v['value']}</div><div class="vital-label">{v['label']}</div></div>
+                    <div class="vital-bar"><span></span></div>
+                </div>""",
+                unsafe_allow_html=True,
+            )
+
+    # --- risk panel: real data once an assessment has been run, sample
+    # data (matching inspo exactly) before that ---
+    gauge_col, factors_col, rec_col = st.columns([1.1, 1.6, 1.3])
+
+    if la:
+        pct = la["risk_pct"]
+        risk_label = "Elevated" if la["at_risk"] else "Low"
+        factor_rows = [(s, "Flagged") for s in la["symptoms"]] or [("No symptoms flagged", "")]
+        recs = [RECOMMENDATION_RULES[k] for k in la["symptom_keys"] if k in RECOMMENDATION_RULES]
+        recs = (recs + DEFAULT_RECS)[:4] if recs else DEFAULT_RECS
+    else:
+        pct = SAMPLE_RISK["pct"]
+        risk_label = SAMPLE_RISK["label"]
+        factor_rows = SAMPLE_RISK["factors"]
+        recs = SAMPLE_RISK["recs"]
+
+    with gauge_col:
+        st.markdown('<div class="risk-panel">', unsafe_allow_html=True)
+        st.markdown(
+            f"""
+            <svg width="150" height="150" viewBox="0 0 150 150" style="display:block;margin:0 auto;">
+              <circle cx="75" cy="75" r="62" fill="none" stroke="#ffffff20" stroke-width="14"/>
+              <circle cx="75" cy="75" r="62" fill="none" stroke="#f2a93b" stroke-width="14"
+                      stroke-dasharray="{2*3.14159*62}"
+                      stroke-dashoffset="{(1-pct/100)*2*3.14159*62}"
+                      stroke-linecap="round" transform="rotate(-90 75 75)"/>
+              <text x="75" y="70" text-anchor="middle" fill="#ffffff" font-size="28" font-weight="800" font-family="Inter">{pct}%</text>
+              <text x="75" y="92" text-anchor="middle" fill="#b9b3d6" font-size="13" font-family="Inter">risk</text>
+            </svg>
+            <div class="risk-label">{risk_label}</div>
+            """,
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with factors_col:
+        st.markdown('<div class="risk-panel">', unsafe_allow_html=True)
+        st.markdown('<h3>Key factors</h3>', unsafe_allow_html=True)
+        for name, level in factor_rows:
+            level_html = f'<span class="lvl-high">{level}</span>' if level else ""
+            st.markdown(f'<div class="factor-row"><span>{name}</span>{level_html}</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with rec_col:
+        st.markdown('<div class="risk-panel">', unsafe_allow_html=True)
+        st.markdown('<h3>Recommendations</h3>', unsafe_allow_html=True)
+        for r in recs:
+            st.markdown(f'<div class="rec-btn">{r}</div>', unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    if not la:
+        st.caption("Showing sample data above. Run a real check under **Risk check** to replace this with your result.")
+    else:
+        history = db.get_history(user["id"], limit=8)
+        if len(history) > 1:
+            st.markdown("#### Your past checks")
+            for h in history:
+                risk_word = "⚠️ At risk" if h["at_risk"] else "✅ Not at risk"
+                st.markdown(
+                    f"- {h['created_at'][:16].replace('T', ' ')} — age {h['age']}, {h['gender']} — "
+                    f"{risk_word} ({h['risk_pct']}%) — {len(h['symptoms'])} symptom(s) flagged"
+                )
+
+# ===========================================================================
+# RISK CHECK
+# ===========================================================================
+elif st.session_state.page == NAV_OPTIONS[1]:
+    st.markdown('<div class="hero"><h1>Stroke Risk Assessment</h1><span class="pill">🩺 Age, gender & symptoms</span><div class="hero-icon">🩺</div></div>', unsafe_allow_html=True)
+
+    if model_error:
+        st.markdown(
+            f"""<div class="setup-warning">⚠️ <b>Model not loaded</b> — {'stroke_model.pkl' if model_error=='missing_model' else 'scaler.pkl'}
+            is missing. Add it next to <code>app.py</code> to enable predictions.</div>""",
+            unsafe_allow_html=True,
+        )
+        st.write("")
+
     with st.form("stroke_form"):
-        age = st.slider("Age", 1, 100, 30)
-        gender = st.selectbox("Gender", ["Male", "Female"])
+        c1, c2 = st.columns(2)
+        with c1:
+            age = st.slider("Age", 1, 100, 30)
+        with c2:
+            gender = st.selectbox("Gender", ["Male", "Female"])
         gender_val = 1 if gender == "Male" else 0
-        symptoms = {
-            "chest_pain": st.checkbox("Chest Pain"),
-            "high_blood_pressure": st.checkbox("High Blood Pressure"),
-            "irregular_heartbeat": st.checkbox("Irregular Heartbeat"),
-            "shortness_of_breath": st.checkbox("Shortness of Breath"),
-            "fatigue_weakness": st.checkbox("Fatigue or Weakness"),
-            "dizziness": st.checkbox("Dizziness"),
-            "swelling_edema": st.checkbox("Swelling or Edema"),
-            "neck_jaw_pain": st.checkbox("Neck or Jaw Pain"),
-            "excessive_sweating": st.checkbox("Excessive Sweating"),
-            "persistent_cough": st.checkbox("Persistent Cough"),
-            "nausea_vomiting": st.checkbox("Nausea or Vomiting"),
-            "chest_discomfort": st.checkbox("Chest Discomfort"),
-            "cold_hands_feet": st.checkbox("Cold Hands/Feet"),
-            "snoring_sleep_apnea": st.checkbox("Snoring / Sleep Apnea"),
-            "anxiety_doom": st.checkbox("Anxiety / Feeling of Doom")
-        }
-        submitted = st.form_submit_button("🔍 Predict Stroke Risk")
+
+        st.markdown("**Symptoms**")
+        cols = st.columns(3)
+        checked_keys = []
+        checked_labels = []
+        symptom_values = []
+        for i, (key, label) in enumerate(SYMPTOMS):
+            with cols[i % 3]:
+                checked = st.checkbox(label, key=f"sym_{key}")
+            symptom_values.append(int(checked))
+            if checked:
+                checked_keys.append(key)
+                checked_labels.append(label)
+
+        submitted = st.form_submit_button("🔍 Predict Stroke Risk", use_container_width=True)
+
         if submitted:
-            age_scaled = scaler.transform([[age]])[0][0]
-            input_data = [age_scaled, gender_val] + [int(symptoms[k]) for k in symptoms]
-            prediction = model.predict([input_data])[0]
-            label = "⚠️ At Risk of Stroke" if prediction == 1 else "✅ Not at Risk"
-            st.success(f"Prediction: {label}")
+            if model_error:
+                st.error("Can't run a prediction — the model file is missing. See the notice above.")
+            else:
+                at_risk, risk_pct = run_prediction(age, gender_val, symptom_values, model, scaler)
+                db.save_assessment(
+                    user["id"], age, gender, checked_labels, checked_keys, at_risk, risk_pct,
+                )
+                if at_risk:
+                    st.error(f"⚠️ At risk of stroke — model confidence {risk_pct}%")
+                else:
+                    st.success(f"✅ Not at risk — model confidence {100-risk_pct}%")
+                st.caption("See the Dashboard tab for the full breakdown.")
 
-elif page == "📰 Stroke News":
-    st.header("Latest Stroke News")
-    if st.button("🔄 Refresh News"):
-        try:
-            response = requests.get(f"https://newsapi.org/v2/everything?q=stroke&apiKey={NEWS_API_KEY}")
-            articles = response.json().get("articles", [])[:5]
-            for article in articles:
-                st.subheader(article['title'])
-                st.write(article['description'])
-                st.markdown(f"[Read more]({article['url']})")
-                st.markdown("---")
-        except:
-            st.error("Failed to load news.")
+# ===========================================================================
+# NEWS
+# ===========================================================================
+elif st.session_state.page == NAV_OPTIONS[2]:
+    import requests
 
-elif page == "💬 Chatbot":
-    st.header("Chat with Stroke Assistant 🧠")
+    st.markdown('<div class="hero"><h1>Latest Stroke News</h1><div class="hero-icon">📰</div></div>', unsafe_allow_html=True)
 
-    if "messages" not in st.session_state:
-        st.session_state.messages = [{"role": "assistant", "content": "Hi! How may I help you regarding stroke?"}]
+    news_api_key = st.secrets.get("NEWS_API_KEY", "") if hasattr(st, "secrets") else ""
+    if not news_api_key:
+        st.warning("Add `NEWS_API_KEY` to `.streamlit/secrets.toml` (or the Streamlit Cloud app secrets) to enable this tab.")
+    else:
+        if st.button("🔄 Refresh news"):
+            try:
+                resp = requests.get(f"https://newsapi.org/v2/everything?q=stroke&apiKey={news_api_key}")
+                articles = resp.json().get("articles", [])[:5]
+                for a in articles:
+                    st.subheader(a["title"])
+                    st.write(a.get("description", ""))
+                    st.markdown(f"[Read more]({a['url']})")
+                    st.markdown("---")
+            except Exception:
+                st.error("Failed to load news.")
 
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.write(message["content"])
+# ===========================================================================
+# CHATBOT
+# ===========================================================================
+elif st.session_state.page == NAV_OPTIONS[3]:
+    st.markdown('<div class="hero"><h1>Chat with Stroke Assistant</h1><div class="hero-icon">💬</div></div>', unsafe_allow_html=True)
 
-    if prompt := st.chat_input("Type your question about stroke here..."):
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.write(prompt)
+    hf_email = st.secrets.get("HF_EMAIL", "") if hasattr(st, "secrets") else ""
+    hf_pass = st.secrets.get("HF_PASS", "") if hasattr(st, "secrets") else ""
 
-        with st.chat_message("assistant"):
-            with st.spinner("Thinking..."):
-                try:
-                    response = query_hugchat(prompt)
-                    st.write(response)
-                    st.session_state.messages.append({"role": "assistant", "content": response})
-                except Exception as e:
-                    st.error("Something went wrong with the chatbot.")
-                    st.error(str(e))
+    if not hf_email or not hf_pass:
+        st.warning(
+            "Chatbot credentials aren't configured. Add `HF_EMAIL` and `HF_PASS` to "
+            "`.streamlit/secrets.toml` locally, or to your app's Secrets in Streamlit Cloud — "
+            "**don't hardcode them in app.py**, especially since this is going in a public repo."
+        )
+    else:
+        from hugchat import hugchat
+        from hugchat.login import Login
+
+        BASE_PROMPT = "Hello, I would like to ask about stroke prevention and symptoms. "
+
+        @st.cache_resource
+        def get_chatbot():
+            sign = Login(hf_email, hf_pass)
+            cookies = sign.login()
+            return hugchat.ChatBot(cookies=cookies.get_dict())
+
+        if "messages" not in st.session_state:
+            st.session_state.messages = [{"role": "assistant", "content": "Hi! How may I help you regarding stroke?"}]
+        if "chat_primed" not in st.session_state:
+            st.session_state.chat_primed = False
+
+        for m in st.session_state.messages:
+            with st.chat_message(m["role"]):
+                st.write(m["content"])
+
+        if prompt := st.chat_input("Type your question about stroke here..."):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.write(prompt)
+            with st.chat_message("assistant"):
+                with st.spinner("Thinking..."):
+                    try:
+                        bot = get_chatbot()
+                        full_prompt = prompt if st.session_state.chat_primed else BASE_PROMPT + prompt
+                        st.session_state.chat_primed = True
+                        response = str(bot.chat(full_prompt)).strip("`")
+                        st.write(response)
+                        st.session_state.messages.append({"role": "assistant", "content": response})
+                    except Exception as e:
+                        st.error("Something went wrong with the chatbot.")
+                        st.error(str(e))
