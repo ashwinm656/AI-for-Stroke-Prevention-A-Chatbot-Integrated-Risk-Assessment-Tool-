@@ -9,25 +9,27 @@ st.set_page_config(page_title="NeuroGuard AI", page_icon="🧠", layout="wide", 
 db.init_db()
 
 # ---------------------------------------------------------------------------
-# REAL FEATURE SET — must match the column order used in stroke_model.py
-# X = df.drop(['stroke_risk_percentage', 'at_risk'], axis=1)
-# i.e. whatever order stroke_data.csv's columns were in (age, gender, then
-# the 15 symptom columns below). If your CSV has a different column order,
-# reorder SYMPTOMS to match or predictions will be wrong.
+# REAL FEATURE SET — trained on the real "Stroke Risk Prediction Dataset
+# Based on Symptoms" (Kaggle, mahatiratusher/stroke-risk-prediction-dataset).
+# Order here MUST match FEATURE_COLUMNS in stroke_model.py exactly: age
+# (scaled) first, then these 15 symptoms in this order.
+# Note: this dataset has no gender column, so gender is recorded (asked in
+# the form, saved to history) but NOT fed into the model — it was never
+# trained on it.
 # ---------------------------------------------------------------------------
 SYMPTOMS = [
     ("chest_pain", "Chest pain"),
-    ("high_blood_pressure", "High blood pressure"),
-    ("irregular_heartbeat", "Irregular heartbeat"),
     ("shortness_of_breath", "Shortness of breath"),
+    ("irregular_heartbeat", "Irregular heartbeat"),
     ("fatigue_weakness", "Fatigue or weakness"),
     ("dizziness", "Dizziness"),
     ("swelling_edema", "Swelling or edema"),
-    ("neck_jaw_pain", "Neck or jaw pain"),
+    ("neck_jaw_pain", "Pain in neck / jaw / shoulder / back"),
     ("excessive_sweating", "Excessive sweating"),
     ("persistent_cough", "Persistent cough"),
     ("nausea_vomiting", "Nausea or vomiting"),
-    ("chest_discomfort", "Chest discomfort"),
+    ("high_blood_pressure", "High blood pressure"),
+    ("chest_discomfort", "Chest discomfort (during activity)"),
     ("cold_hands_feet", "Cold hands / feet"),
     ("snoring_sleep_apnea", "Snoring / sleep apnea"),
     ("anxiety_doom", "Anxiety / feeling of doom"),
@@ -79,9 +81,9 @@ def load_model_and_scaler():
     return model, scaler, None
 
 
-def run_prediction(age, gender_val, symptom_values, model, scaler):
+def run_prediction(age, symptom_values, model, scaler):
     age_scaled = scaler.transform([[age]])[0][0]
-    input_data = [age_scaled, gender_val] + symptom_values
+    input_data = [age_scaled] + symptom_values
     pred = model.predict([input_data])[0]
     try:
         proba = model.predict_proba([input_data])[0][1]  # P(at_risk)
@@ -459,7 +461,7 @@ elif st.session_state.page == NAV_OPTIONS[1]:
             age = st.slider("Age", 1, 100, 30)
         with c2:
             gender = st.selectbox("Gender", ["Male", "Female"])
-        gender_val = 1 if gender == "Male" else 0
+        st.caption("Gender is recorded in your history but isn't used by the model — the training data didn't include it.")
 
         st.markdown("**Symptoms**")
         cols = st.columns(3)
@@ -480,7 +482,7 @@ elif st.session_state.page == NAV_OPTIONS[1]:
             if model_error:
                 st.error("Can't run a prediction — the model file is missing. See the notice above.")
             else:
-                at_risk, risk_pct = run_prediction(age, gender_val, symptom_values, model, scaler)
+                at_risk, risk_pct = run_prediction(age, symptom_values, model, scaler)
                 db.save_assessment(
                     user["id"], age, gender, checked_labels, checked_keys, at_risk, risk_pct,
                 )
