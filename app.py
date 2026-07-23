@@ -376,6 +376,8 @@ with st.sidebar:
         for k in ("messages",):
             st.session_state.pop(k, None)
         st.rerun()
+    st.markdown("---")
+    st.caption("Developed by Ashwin Muralidharan · MS Data Science, UNT")
 
 model_error = check_model_files()
 
@@ -385,11 +387,6 @@ model_error = check_model_files()
 if st.session_state.page == NAV_OPTIONS[0]:
     la = db.get_latest_assessment(user["id"])
     stats = db.get_stats(user["id"])
-
-    top_l, top_r = st.columns([10, 1])
-    with top_r:
-        st.markdown('<div style="background:#fff;border-radius:14px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:1px solid #eceaf5;position:relative;">🔔<span style="position:absolute;top:9px;right:10px;width:8px;height:8px;background:#e8543f;border-radius:50%;"></span></div>', unsafe_allow_html=True)
-    st.write("")
 
     if la:
         last_check_text = la["created_at"][:10]
