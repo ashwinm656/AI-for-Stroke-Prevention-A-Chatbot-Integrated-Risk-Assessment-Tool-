@@ -187,9 +187,15 @@ st.markdown(
 
     .setup-warning { background:#3a2c0e; border-left:4px solid #f2a93b; padding:16px 20px; border-radius:8px; color:#f4f1fb; }
 
+    div.st-key-dashboard_search { position:relative; }
+    div.st-key-dashboard_search div[data-testid="stTextInputRootElement"] { position:relative; }
+    div.st-key-dashboard_search div[data-testid="stTextInputRootElement"]::before {
+        content:"🔍"; position:absolute; left:16px; top:50%; transform:translateY(-50%);
+        font-size:14px; pointer-events:none; z-index:1; line-height:1;
+    }
     div.st-key-dashboard_search input {
         background:#fff !important; border-radius:14px !important; border:1px solid #eceaf5 !important;
-        padding:12px 18px !important; color:#1a1a2e !important;
+        padding:12px 18px 12px 40px !important; color:#1a1a2e !important; line-height:1.6 !important;
     }
 
     div[data-testid="stMainBlockContainer"] div[data-testid="stButton"] button,
@@ -244,10 +250,10 @@ if st.session_state.auth_user is None:
         .auth-tagline { text-align:center; color:#b9b3d6; font-size:0.92rem; margin-bottom:30px; }
 
         div.st-key-auth_card { max-width:420px; margin:0 auto; }
-        div.st-key-auth_card div[data-testid="stTabs"] button[data-baseweb="tab"] { color:#8a84a8; font-weight:600; }
-        div.st-key-auth_card div[data-testid="stTabs"] button[aria-selected="true"] { color:#f2a93b; }
-        div.st-key-auth_card div[data-testid="stTabs"] div[data-baseweb="tab-highlight"] { background-color:#f2a93b; height:2.5px; }
-        div.st-key-auth_card div[data-testid="stTabs"] div[data-baseweb="tab-border"] { background-color:#ffffff14; }
+        div.st-key-auth_card div[data-testid="stTab"] p { color:#8a84a8 !important; font-weight:600; }
+        div.st-key-auth_card div[data-testid="stTab"][aria-selected="true"] p { color:#f2a93b !important; }
+        div.st-key-auth_card div[data-testid="stTab"] .react-aria-SelectionIndicator { background-color:#f2a93b !important; }
+        div.st-key-auth_card div[data-testid="stTabs"] { border-bottom:1px solid #ffffff14; }
         div.st-key-auth_card div[data-testid="stForm"] {
             background: linear-gradient(160deg, #201959, #17102f);
             border:1px solid #ffffff14; border-radius:20px; padding:32px 30px;
@@ -263,6 +269,10 @@ if st.session_state.auth_user is None:
         div.st-key-auth_card div[data-testid="stForm"] input:focus {
             border:1px solid #f2a93b !important; box-shadow:0 0 0 1px #f2a93b55 !important;
         }
+        /* Streamlit's "Press Enter to submit form" hint assumes the input's
+           default size — our custom padding above changes that, which made
+           the hint render overlapping the input text instead of below it. */
+        div.st-key-auth_card div[data-testid="InputInstructions"] { display:none !important; }
         div.st-key-auth_card div[data-testid="stFormSubmitButton"] button { margin-top:8px; }
         </style>
         """,
@@ -361,7 +371,7 @@ if st.session_state.page == NAV_OPTIONS[0]:
     top_l, top_r = st.columns([10, 1])
     with top_l:
         query = st.text_input(
-            "search", placeholder="🔍  Search symptoms, reports...",
+            "search", placeholder="Search symptoms, reports...",
             label_visibility="collapsed", key="dashboard_search",
         )
     with top_r:
