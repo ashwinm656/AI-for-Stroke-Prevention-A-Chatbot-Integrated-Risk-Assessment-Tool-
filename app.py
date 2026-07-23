@@ -5,7 +5,7 @@ import streamlit as st
 
 import db
 
-st.set_page_config(page_title="NeuroCare", page_icon="🧠", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="NeuroGuard AI", page_icon="🧠", layout="wide", initial_sidebar_state="expanded")
 db.init_db()
 
 # ---------------------------------------------------------------------------
@@ -91,7 +91,7 @@ def run_prediction(age, gender_val, symptom_values, model, scaler):
 
 
 # ---------------------------------------------------------------------------
-# STYLES  (dark NeuroCare theme)
+# STYLES  (dark NeuroGuard AI theme)
 # ---------------------------------------------------------------------------
 st.markdown(
     """
@@ -103,6 +103,7 @@ st.markdown(
         --text-light:#f4f1fb; --text-dim:#b9b3d6;
     }
     .stApp { background:#f4f5fa; }
+    header[data-testid="stHeader"] { background:#f4f5fa !important; }
     .block-container { padding-top:1.5rem; padding-bottom:3rem; max-width:1100px; }
 
     section[data-testid="stSidebar"] { background:var(--navy-deep); border-right:1px solid #ffffff10; }
@@ -144,8 +145,14 @@ st.markdown(
     .vital-amber .vital-bar span { background:#f7c04a; width:60%; }
     .vital-purple .vital-bar span { background:#b8a8ff; width:80%; }
 
-    .risk-panel { background: linear-gradient(135deg, var(--navy-card2), var(--navy-deep)); border-radius:22px; padding:30px 36px; }
-    .risk-panel h3 { color:var(--accent); font-size:1rem; font-weight:700; margin:0 0 14px 0; }
+    div.st-key-risk_gauge, div.st-key-risk_factors, div.st-key-risk_rec {
+        background: linear-gradient(135deg, var(--navy-card2), var(--navy-deep)) !important;
+        border-radius:22px !important; padding:26px 30px !important;
+    }
+    div.st-key-risk_gauge h3, div.st-key-risk_factors h3, div.st-key-risk_rec h3,
+    div.st-key-risk_gauge h4, div.st-key-risk_factors h4, div.st-key-risk_rec h4 {
+        color:var(--accent) !important; font-size:1rem !important; font-weight:700 !important; margin:0 0 14px 0 !important;
+    }
     .factor-row { display:flex; justify-content:space-between; padding:9px 0; color:#e8e4fa; font-size:0.95rem; border-bottom:1px solid #ffffff10; }
     .factor-row .lvl-high { color:#ff8a7a; font-weight:700; }
     .rec-btn { display:block; text-align:center; background:#ffffff14; color:#e8e4fa; padding:11px 10px;
@@ -185,24 +192,55 @@ if st.session_state.auth_user is None:
         """
         <style>
         .stApp { background: linear-gradient(160deg, #1c1440, #120c2b) !important; }
-        div[data-testid="stTabs"] button[data-baseweb="tab"] { color:#b9b3d6; font-weight:600; }
-        div[data-testid="stTabs"] button[aria-selected="true"] { color:#f2a93b; }
-        div[data-testid="stTabs"] div[data-baseweb="tab-highlight"] { background-color:#f2a93b; }
-        div[data-testid="stTabs"] div[data-baseweb="tab-border"] { background-color:#ffffff22; }
-        div[data-testid="stForm"] {
-            background:#1c1440; border:1px solid #ffffff18; border-radius:18px; padding:28px 26px;
+        header[data-testid="stHeader"] { background: linear-gradient(160deg, #1c1440, #120c2b) !important; }
+
+        .auth-badge {
+            width:64px; height:64px; margin:0 auto 18px auto; border-radius:50%;
+            background: linear-gradient(135deg, #6a4bd6, #f2a93b);
+            display:flex; align-items:center; justify-content:center; font-size:1.8rem;
+            box-shadow: 0 0 0 6px #ffffff0d, 0 10px 30px #6a4bd655;
         }
-        div[data-testid="stForm"] label p { color:#e8e4fa !important; font-weight:500; }
-        div[data-testid="stForm"] input {
-            background:#120c2b !important; color:#f4f1fb !important; border:1px solid #ffffff22 !important;
+        .auth-brand { text-align:center; color:#fff; font-weight:800; font-size:1.8rem; margin-bottom:6px;
+                      letter-spacing:-0.02em; }
+        .auth-tagline { text-align:center; color:#b9b3d6; font-size:0.92rem; margin-bottom:30px; }
+
+        div.st-key-auth_card { max-width:420px; margin:0 auto; }
+        div.st-key-auth_card div[data-testid="stTabs"] button[data-baseweb="tab"] { color:#8a84a8; font-weight:600; }
+        div.st-key-auth_card div[data-testid="stTabs"] button[aria-selected="true"] { color:#f2a93b; }
+        div.st-key-auth_card div[data-testid="stTabs"] div[data-baseweb="tab-highlight"] { background-color:#f2a93b; height:2.5px; }
+        div.st-key-auth_card div[data-testid="stTabs"] div[data-baseweb="tab-border"] { background-color:#ffffff14; }
+        div.st-key-auth_card div[data-testid="stForm"] {
+            background: linear-gradient(160deg, #201959, #17102f);
+            border:1px solid #ffffff14; border-radius:20px; padding:32px 30px;
+            box-shadow: 0 20px 50px #00000040;
         }
+        div.st-key-auth_card div[data-testid="stForm"] label p {
+            color:#c9c3e8 !important; font-weight:500; font-size:0.88rem;
+        }
+        div.st-key-auth_card div[data-testid="stForm"] input {
+            background:#120c2b !important; color:#f4f1fb !important;
+            border:1px solid #ffffff1f !important; border-radius:10px !important; padding:10px 14px !important;
+        }
+        div.st-key-auth_card div[data-testid="stForm"] input:focus {
+            border:1px solid #f2a93b !important; box-shadow:0 0 0 1px #f2a93b55 !important;
+        }
+        div.st-key-auth_card div[data-testid="stFormSubmitButton"] button { margin-top:8px; }
         </style>
         """,
         unsafe_allow_html=True,
     )
-    st.markdown('<div class="auth-wrap"><div class="auth-brand">🧠 NeuroCare</div></div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div class="auth-wrap">
+            <div class="auth-badge">🧠</div>
+            <div class="auth-brand">NeuroGuard AI</div>
+            <div class="auth-tagline">AI-powered stroke risk assessment &amp; prevention</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     _, mid, _ = st.columns([1, 1.4, 1])
-    with mid:
+    with mid, st.container(key="auth_card"):
         tab_login, tab_signup = st.tabs(["Log in", "Sign up"])
 
         with tab_login:
@@ -244,7 +282,7 @@ user = st.session_state.auth_user
 # ---------------------------------------------------------------------------
 NAV_OPTIONS = ["🖥️  Dashboard", "🩺  Risk check", "📰  News", "💬  Chatbot"]
 with st.sidebar:
-    st.markdown('<div class="brand"><span>🧠</span> NeuroCare</div>', unsafe_allow_html=True)
+    st.markdown('<div class="brand"><span>🧠</span> NeuroGuard AI</div>', unsafe_allow_html=True)
     if "page" not in st.session_state:
         st.session_state.page = NAV_OPTIONS[0]
     st.session_state.page = st.radio(
@@ -339,8 +377,7 @@ if st.session_state.page == NAV_OPTIONS[0]:
         factor_rows = SAMPLE_RISK["factors"]
         recs = SAMPLE_RISK["recs"]
 
-    with gauge_col:
-        st.markdown('<div class="risk-panel">', unsafe_allow_html=True)
+    with gauge_col, st.container(key="risk_gauge"):
         st.markdown(
             f"""
             <svg width="150" height="150" viewBox="0 0 150 150" style="display:block;margin:0 auto;">
@@ -356,22 +393,17 @@ if st.session_state.page == NAV_OPTIONS[0]:
             """,
             unsafe_allow_html=True,
         )
-        st.markdown("</div>", unsafe_allow_html=True)
 
-    with factors_col:
-        st.markdown('<div class="risk-panel">', unsafe_allow_html=True)
+    with factors_col, st.container(key="risk_factors"):
         st.markdown('<h3>Key factors</h3>', unsafe_allow_html=True)
         for name, level in factor_rows:
             level_html = f'<span class="lvl-high">{level}</span>' if level else ""
             st.markdown(f'<div class="factor-row"><span>{name}</span>{level_html}</div>', unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
 
-    with rec_col:
-        st.markdown('<div class="risk-panel">', unsafe_allow_html=True)
+    with rec_col, st.container(key="risk_rec"):
         st.markdown('<h3>Recommendations</h3>', unsafe_allow_html=True)
         for r in recs:
             st.markdown(f'<div class="rec-btn">{r}</div>', unsafe_allow_html=True)
-        st.markdown("</div>", unsafe_allow_html=True)
 
     if not la:
         st.caption("Showing sample data above. Run a real check under **Risk check** to replace this with your result.")
