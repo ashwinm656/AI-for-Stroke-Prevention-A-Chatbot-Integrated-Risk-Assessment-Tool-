@@ -81,6 +81,19 @@ def load_model_and_scaler():
     return model, scaler, None
 
 
+def check_model_files():
+    """Cheap existence check — doesn't unpickle the ~22MB model file, so
+    pages that only need to show a "model not configured" warning (rather
+    than actually run a prediction) don't pay that load cost."""
+    model_path = os.path.join(APP_DIR, "stroke_model.pkl")
+    scaler_path = os.path.join(APP_DIR, "scaler.pkl")
+    if not os.path.exists(model_path):
+        return "missing_model"
+    if not os.path.exists(scaler_path):
+        return "missing_scaler"
+    return None
+
+
 def run_prediction(age, symptom_values, model, scaler):
     age_scaled = scaler.transform([[age]])[0][0]
     input_data = [age_scaled] + symptom_values
@@ -173,6 +186,11 @@ st.markdown(
     .risk-label { color:var(--accent); font-weight:700; text-align:center; margin-top:8px; font-size:1.05rem; }
 
     .setup-warning { background:#3a2c0e; border-left:4px solid #f2a93b; padding:16px 20px; border-radius:8px; color:#f4f1fb; }
+
+    div.st-key-dashboard_search input {
+        background:#fff !important; border-radius:14px !important; border:1px solid #eceaf5 !important;
+        padding:12px 18px !important; color:#1a1a2e !important;
+    }
 
     div[data-testid="stMainBlockContainer"] div[data-testid="stButton"] button,
     div[data-testid="stMainBlockContainer"] div[data-testid="stFormSubmitButton"] button {
@@ -323,7 +341,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption("Developed by Ashwin Muralidharan · MS Data Science, UNT")
 
-model, scaler, model_error = load_model_and_scaler()
+model_error = check_model_files()
 
 # ===========================================================================
 # DASHBOARD
@@ -334,10 +352,29 @@ if st.session_state.page == NAV_OPTIONS[0]:
 
     top_l, top_r = st.columns([10, 1])
     with top_l:
-        st.markdown('<div style="background:#fff;border-radius:14px;padding:12px 18px;color:#9b9bb0;border:1px solid #eceaf5;">🔍&nbsp;&nbsp;Search symptoms, reports...</div>', unsafe_allow_html=True)
+        query = st.text_input(
+            "search", placeholder="🔍  Search symptoms, reports...",
+            label_visibility="collapsed", key="dashboard_search",
+        )
     with top_r:
         st.markdown('<div style="background:#fff;border-radius:14px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:1px solid #eceaf5;position:relative;">🔔<span style="position:absolute;top:9px;right:10px;width:8px;height:8px;background:#e8543f;border-radius:50%;"></span></div>', unsafe_allow_html=True)
     st.write("")
+
+    if query.strip():
+        matches = [
+            h for h in db.get_history(user["id"], limit=50)
+            if any(query.strip().lower() in s.lower() for s in h["symptoms"])
+        ]
+        st.markdown(f"**{len(matches)} report(s) matching \"{query}\"**")
+        if not matches:
+            st.caption("No past checks flagged that symptom. Try a different term, or run a new assessment under Risk check.")
+        for h in matches:
+            risk_word = "⚠️ At risk" if h["at_risk"] else "✅ Not at risk"
+            st.markdown(
+                f"- {h['created_at'][:16].replace('T', ' ')} — age {h['age']}, {h['gender']} — "
+                f"{risk_word} ({h['risk_pct']}%) — flagged: {', '.join(h['symptoms'])}"
+            )
+        st.markdown("---")
 
     if la:
         last_check_text = la["created_at"][:10]
@@ -464,7 +501,6 @@ elif st.session_state.page == NAV_OPTIONS[1]:
             age = st.slider("Age", 1, 100, 30)
         with c2:
             gender = st.selectbox("Gender", ["Male", "Female"])
-        st.caption("Gender is recorded in your history but isn't used by the model — the training data didn't include it.")
 
         st.markdown("**Symptoms**")
         cols = st.columns(3)
@@ -485,6 +521,8 @@ elif st.session_state.page == NAV_OPTIONS[1]:
             if model_error:
                 st.error("Can't run a prediction — the model file is missing. See the notice above.")
             else:
+                with st.spinner("Loading model..."):
+                    model, scaler, _ = load_model_and_scaler()
                 at_risk, risk_pct = run_prediction(age, symptom_values, model, scaler)
                 db.save_assessment(
                     user["id"], age, gender, checked_labels, checked_keys, at_risk, risk_pct,
@@ -507,17 +545,23 @@ elif st.session_state.page == NAV_OPTIONS[2]:
     if not news_api_key:
         st.warning("Add `NEWS_API_KEY` to `.streamlit/secrets.toml` (or the Streamlit Cloud app secrets) to enable this tab.")
     else:
+        @st.cache_data(ttl=1800, show_spinner="Loading news...")
+        def fetch_news(api_key):
+            resp = requests.get(f"https://newsapi.org/v2/everything?q=stroke&apiKey={api_key}")
+            return resp.json().get("articles", [])[:5]
+
         if st.button("🔄 Refresh news"):
-            try:
-                resp = requests.get(f"https://newsapi.org/v2/everything?q=stroke&apiKey={news_api_key}")
-                articles = resp.json().get("articles", [])[:5]
-                for a in articles:
-                    st.subheader(a["title"])
-                    st.write(a.get("description", ""))
-                    st.markdown(f"[Read more]({a['url']})")
-                    st.markdown("---")
-            except Exception:
-                st.error("Failed to load news.")
+            fetch_news.clear()
+
+        try:
+            articles = fetch_news(news_api_key)
+            for a in articles:
+                st.subheader(a["title"])
+                st.write(a.get("description", ""))
+                st.markdown(f"[Read more]({a['url']})")
+                st.markdown("---")
+        except Exception:
+            st.error("Failed to load news.")
 
 # ===========================================================================
 # CHATBOT
@@ -569,5 +613,15 @@ elif st.session_state.page == NAV_OPTIONS[3]:
                         st.write(response)
                         st.session_state.messages.append({"role": "assistant", "content": response})
                     except Exception as e:
-                        st.error("Something went wrong with the chatbot.")
-                        st.error(str(e))
+                        st.error(
+                            "The chatbot request failed. This is usually one of:\n\n"
+                            "1. **Your Hugging Face account hasn't accepted HuggingChat's terms** — "
+                            "log into [huggingface.co/chat](https://huggingface.co/chat) in a browser with "
+                            "the same email/password once, accept any ToS/model prompts, then try again here.\n"
+                            "2. **Wrong credentials** — double-check `HF_EMAIL`/`HF_PASS` in your secrets "
+                            "match an account that can log into huggingface.co/chat normally.\n"
+                            "3. **Hugging Face changed something** — `hugchat` is an unofficial client that "
+                            "reverse-engineers the HuggingChat web UI, so it can break whenever HF updates "
+                            "their site, independent of anything in this app.\n\n"
+                            f"Raw error: `{e}`"
+                        )
