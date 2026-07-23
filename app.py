@@ -63,6 +63,35 @@ RECOMMENDATION_RULES = {
 }
 DEFAULT_RECS = ["Consult a doctor", "Track weekly", "Stay hydrated", "Light daily exercise"]
 
+# Rough, non-diagnostic bucketing for display only — not used by the model,
+# not medical advice. Just gives the Dashboard's "Key factors" panel a
+# label to show next to numbers the user actually entered.
+def classify_vitals(la):
+    rows = []
+    if la.get("systolic_bp") is not None and la.get("diastolic_bp") is not None:
+        sbp, dbp = la["systolic_bp"], la["diastolic_bp"]
+        level = "High" if (sbp >= 130 or dbp >= 80) else ("Elevated" if sbp >= 120 else "Normal")
+        rows.append((f"Blood pressure ({sbp}/{dbp})", level))
+    if la.get("glucose") is not None:
+        g = la["glucose"]
+        level = "High" if g >= 126 else ("Elevated" if g >= 100 else "Normal")
+        rows.append((f"Glucose ({g} mg/dL)", level))
+    if la.get("bmi") is not None:
+        b = la["bmi"]
+        level = "Low" if b < 18.5 else ("High" if b >= 30 else ("Elevated" if b >= 25 else "Normal"))
+        rows.append((f"BMI ({b})", level))
+    return rows
+
+def level_css_class(level):
+    l = level.lower()
+    if l in ("high", "flagged"):
+        return "lvl-high"
+    if l in ("elevated", "low"):
+        return "lvl-elevated"
+    if l == "normal":
+        return "lvl-normal"
+    return "lvl-high"
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -181,22 +210,13 @@ st.markdown(
     }
     .factor-row { display:flex; justify-content:space-between; padding:9px 0; color:#e8e4fa; font-size:0.95rem; border-bottom:1px solid #ffffff10; }
     .factor-row .lvl-high { color:#ff8a7a; font-weight:700; }
+    .factor-row .lvl-elevated { color:#f7c04a; font-weight:700; }
+    .factor-row .lvl-normal { color:#5fe3ac; font-weight:700; }
     .rec-btn { display:block; text-align:center; background:#ffffff14; color:#e8e4fa; padding:11px 10px;
                border-radius:12px; font-size:0.88rem; font-weight:600; margin-bottom:10px; }
     .risk-label { color:var(--accent); font-weight:700; text-align:center; margin-top:8px; font-size:1.05rem; }
 
     .setup-warning { background:#3a2c0e; border-left:4px solid #f2a93b; padding:16px 20px; border-radius:8px; color:#f4f1fb; }
-
-    div.st-key-dashboard_search { position:relative; }
-    div.st-key-dashboard_search div[data-testid="stTextInputRootElement"] { position:relative; }
-    div.st-key-dashboard_search div[data-testid="stTextInputRootElement"]::before {
-        content:"🔍"; position:absolute; left:16px; top:50%; transform:translateY(-50%);
-        font-size:14px; pointer-events:none; z-index:1; line-height:1;
-    }
-    div.st-key-dashboard_search input {
-        background:#fff !important; border-radius:14px !important; border:1px solid #eceaf5 !important;
-        padding:12px 18px 12px 40px !important; color:#1a1a2e !important; line-height:1.6 !important;
-    }
 
     div[data-testid="stMainBlockContainer"] div[data-testid="stButton"] button,
     div[data-testid="stMainBlockContainer"] div[data-testid="stFormSubmitButton"] button {
@@ -356,8 +376,6 @@ with st.sidebar:
         for k in ("messages",):
             st.session_state.pop(k, None)
         st.rerun()
-    st.markdown("---")
-    st.caption("Developed by Ashwin Muralidharan · MS Data Science, UNT")
 
 model_error = check_model_files()
 
@@ -369,30 +387,9 @@ if st.session_state.page == NAV_OPTIONS[0]:
     stats = db.get_stats(user["id"])
 
     top_l, top_r = st.columns([10, 1])
-    with top_l:
-        query = st.text_input(
-            "search", placeholder="Search symptoms, reports...",
-            label_visibility="collapsed", key="dashboard_search",
-        )
     with top_r:
         st.markdown('<div style="background:#fff;border-radius:14px;width:44px;height:44px;display:flex;align-items:center;justify-content:center;border:1px solid #eceaf5;position:relative;">🔔<span style="position:absolute;top:9px;right:10px;width:8px;height:8px;background:#e8543f;border-radius:50%;"></span></div>', unsafe_allow_html=True)
     st.write("")
-
-    if query.strip():
-        matches = [
-            h for h in db.get_history(user["id"], limit=50)
-            if any(query.strip().lower() in s.lower() for s in h["symptoms"])
-        ]
-        st.markdown(f"**{len(matches)} report(s) matching \"{query}\"**")
-        if not matches:
-            st.caption("No past checks flagged that symptom. Try a different term, or run a new assessment under Risk check.")
-        for h in matches:
-            risk_word = "⚠️ At risk" if h["at_risk"] else "✅ Not at risk"
-            st.markdown(
-                f"- {h['created_at'][:16].replace('T', ' ')} — age {h['age']}, {h['gender']} — "
-                f"{risk_word} ({h['risk_pct']}%) — flagged: {', '.join(h['symptoms'])}"
-            )
-        st.markdown("---")
 
     if la:
         last_check_text = la["created_at"][:10]
@@ -427,15 +424,28 @@ if st.session_state.page == NAV_OPTIONS[0]:
         )
         st.write("")
 
-    # --- 4 vital cards (matches inspo exactly; illustrative demo values —
-    # this dataset doesn't include wearable vitals) ---
+    # --- 4 vital cards: your real entered values once you've run a check,
+    # illustrative sample values (matching the inspo) before that ---
+    if la:
+        vitals_to_show = [
+            {"label": "Heart rate", "value": f"{la['heart_rate']} bpm" if la['heart_rate'] is not None else "—", "icon": "❤️", "css": "vital-red"},
+            {"label": "Blood pressure", "value": f"{la['systolic_bp']}/{la['diastolic_bp']}" if la['systolic_bp'] is not None else "—", "icon": "💧", "css": "vital-green"},
+            {"label": "Sleep", "value": f"{la['sleep_hours']} hrs" if la['sleep_hours'] is not None else "—", "icon": "🌙", "css": "vital-amber"},
+            {"label": "Steps", "value": f"{la['steps']:,}" if la['steps'] is not None else "—", "icon": "👣", "css": "vital-purple"},
+        ]
+    else:
+        vitals_to_show = DEMO_VITALS
+
     cols = st.columns(4)
-    for col, v in zip(cols, DEMO_VITALS):
-        arrow = "↗" if v["dir"] == "up" else "↘"
+    for col, v in zip(cols, vitals_to_show):
+        delta_html = ""
+        if "delta" in v:
+            arrow = "↗" if v["dir"] == "up" else "↘"
+            delta_html = f'<span class="vital-delta">{arrow} {v["delta"]}</span>'
         with col:
             st.markdown(
                 f"""<div class="vital-card {v['css']}">
-                    <div class="vital-top"><span>{v['icon']}</span><span class="vital-delta">{arrow} {v['delta']}</span></div>
+                    <div class="vital-top"><span>{v['icon']}</span>{delta_html}</div>
                     <div><div class="vital-value">{v['value']}</div><div class="vital-label">{v['label']}</div></div>
                     <div class="vital-bar"><span></span></div>
                 </div>""",
@@ -449,7 +459,9 @@ if st.session_state.page == NAV_OPTIONS[0]:
     if la:
         pct = la["risk_pct"]
         risk_label = "Elevated" if la["at_risk"] else "Low"
-        factor_rows = [(s, "Flagged") for s in la["symptoms"]] or [("No symptoms flagged", "")]
+        factor_rows = [(s, "Flagged") for s in la["symptoms"]] + classify_vitals(la)
+        if not factor_rows:
+            factor_rows = [("No symptoms flagged", "")]
         recs = [RECOMMENDATION_RULES[k] for k in la["symptom_keys"] if k in RECOMMENDATION_RULES]
         recs = (recs + DEFAULT_RECS)[:4] if recs else DEFAULT_RECS
     else:
@@ -478,7 +490,7 @@ if st.session_state.page == NAV_OPTIONS[0]:
     with factors_col, st.container(key="risk_factors"):
         st.markdown('<h3>Key factors</h3>', unsafe_allow_html=True)
         for name, level in factor_rows:
-            level_html = f'<span class="lvl-high">{level}</span>' if level else ""
+            level_html = f'<span class="{level_css_class(level)}">{level}</span>' if level else ""
             st.markdown(f'<div class="factor-row"><span>{name}</span>{level_html}</div>', unsafe_allow_html=True)
 
     with rec_col, st.container(key="risk_rec"):
@@ -503,7 +515,7 @@ if st.session_state.page == NAV_OPTIONS[0]:
 # RISK CHECK
 # ===========================================================================
 elif st.session_state.page == NAV_OPTIONS[1]:
-    st.markdown('<div class="hero"><h1>Stroke Risk Assessment</h1><span class="pill">🩺 Age, gender & symptoms</span><div class="hero-icon">🩺</div></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero"><h1>Stroke Risk Assessment</h1><span class="pill">🩺 Age, gender, vitals & symptoms</span><div class="hero-icon">🩺</div></div>', unsafe_allow_html=True)
 
     if model_error:
         st.markdown(
@@ -519,6 +531,24 @@ elif st.session_state.page == NAV_OPTIONS[1]:
             age = st.slider("Age", 1, 100, 30)
         with c2:
             gender = st.selectbox("Gender", ["Male", "Female"])
+
+        st.markdown("**Vitals**")
+        st.caption("Shown on your Dashboard — the prediction model itself only uses age + symptoms below (see README for why).")
+        v1, v2, v3 = st.columns(3)
+        with v1:
+            systolic_bp = st.number_input("Systolic BP (mmHg)", 80, 220, 120)
+            heart_rate = st.number_input("Resting heart rate (bpm)", 30, 220, 72)
+        with v2:
+            diastolic_bp = st.number_input("Diastolic BP (mmHg)", 40, 140, 80)
+            sleep_hours = st.number_input("Sleep last night (hrs)", 0.0, 14.0, 7.0, step=0.5)
+        with v3:
+            glucose = st.number_input("Glucose (mg/dL)", 50, 400, 90)
+            steps = st.number_input("Steps yesterday", 0, 40000, 5000, step=100)
+        w1, w2 = st.columns(2)
+        with w1:
+            height_cm = st.number_input("Height (cm)", 100, 230, 170)
+        with w2:
+            weight_kg = st.number_input("Weight (kg)", 30, 250, 70)
 
         st.markdown("**Symptoms**")
         cols = st.columns(3)
@@ -542,8 +572,11 @@ elif st.session_state.page == NAV_OPTIONS[1]:
                 with st.spinner("Loading model..."):
                     model, scaler, _ = load_model_and_scaler()
                 at_risk, risk_pct = run_prediction(age, symptom_values, model, scaler)
+                bmi = round(weight_kg / ((height_cm / 100) ** 2), 1)
                 db.save_assessment(
                     user["id"], age, gender, checked_labels, checked_keys, at_risk, risk_pct,
+                    systolic_bp=systolic_bp, diastolic_bp=diastolic_bp, glucose=glucose, bmi=bmi,
+                    heart_rate=heart_rate, sleep_hours=sleep_hours, steps=steps,
                 )
                 if at_risk:
                     st.error(f"⚠️ At risk of stroke — model confidence {risk_pct}%")
