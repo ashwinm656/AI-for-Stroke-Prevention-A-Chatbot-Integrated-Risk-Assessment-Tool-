@@ -361,6 +361,9 @@ if st.session_state.page == NAV_OPTIONS[0]:
         st.session_state.pending_nav = NAV_OPTIONS[1]
         st.rerun()
 
+    if not la:
+        st.info("👋 **This is sample data** — you haven't run a real assessment yet. Everything below is a preview to show the layout. Click **Start new assessment** above to get your actual result.")
+
     if model_error:
         st.markdown(
             f"""<div class="setup-warning">⚠️ <b>Model not loaded</b> — {'stroke_model.pkl' if model_error=='missing_model' else 'scaler.pkl'}
