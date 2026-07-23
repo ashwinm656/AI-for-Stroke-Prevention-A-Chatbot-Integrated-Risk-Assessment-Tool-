@@ -48,6 +48,13 @@ def init_db():
             FOREIGN KEY(user_id) REFERENCES users(id)
         )"""
     )
+    # Lightweight migration: add vitals columns if this is an older db file
+    # that predates them, so existing local databases don't just break.
+    existing_cols = {row["name"] for row in conn.execute("PRAGMA table_info(assessments)").fetchall()}
+    for col in ("systolic_bp", "diastolic_bp", "glucose", "bmi", "heart_rate", "sleep_hours", "steps"):
+        if col not in existing_cols:
+            col_type = "INTEGER" if col != "bmi" else "REAL"
+            conn.execute(f"ALTER TABLE assessments ADD COLUMN {col} {col_type}")
     conn.commit()
     conn.close()
 
@@ -103,15 +110,21 @@ def verify_user(username_or_email, password):
     return {"id": row["id"], "username": row["username"], "email": row["email"]}
 
 
-def save_assessment(user_id, age, gender, symptom_labels, symptom_keys, at_risk, risk_pct):
+def save_assessment(
+    user_id, age, gender, symptom_labels, symptom_keys, at_risk, risk_pct,
+    systolic_bp=None, diastolic_bp=None, glucose=None, bmi=None,
+    heart_rate=None, sleep_hours=None, steps=None,
+):
     conn = get_conn()
     conn.execute(
-        "INSERT INTO assessments (user_id, created_at, age, gender, symptoms_json, at_risk, risk_pct) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO assessments (user_id, created_at, age, gender, symptoms_json, at_risk, risk_pct, "
+        "systolic_bp, diastolic_bp, glucose, bmi, heart_rate, sleep_hours, steps) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             user_id, datetime.utcnow().isoformat(), age, gender,
             json.dumps({"labels": symptom_labels, "keys": symptom_keys}),
             int(at_risk), int(risk_pct),
+            systolic_bp, diastolic_bp, glucose, bmi, heart_rate, sleep_hours, steps,
         ),
     )
     conn.commit()
@@ -131,6 +144,9 @@ def get_latest_assessment(user_id):
         "created_at": row["created_at"], "age": row["age"], "gender": row["gender"],
         "symptoms": symptoms["labels"], "symptom_keys": symptoms["keys"],
         "at_risk": bool(row["at_risk"]), "risk_pct": row["risk_pct"],
+        "systolic_bp": row["systolic_bp"], "diastolic_bp": row["diastolic_bp"],
+        "glucose": row["glucose"], "bmi": row["bmi"], "heart_rate": row["heart_rate"],
+        "sleep_hours": row["sleep_hours"], "steps": row["steps"],
     }
 
 
@@ -146,6 +162,9 @@ def get_history(user_id, limit=10):
         out.append({
             "created_at": row["created_at"], "age": row["age"], "gender": row["gender"],
             "symptoms": symptoms["labels"], "at_risk": bool(row["at_risk"]), "risk_pct": row["risk_pct"],
+            "systolic_bp": row["systolic_bp"], "diastolic_bp": row["diastolic_bp"],
+            "glucose": row["glucose"], "bmi": row["bmi"], "heart_rate": row["heart_rate"],
+            "sleep_hours": row["sleep_hours"], "steps": row["steps"],
         })
     return out
 
