@@ -106,6 +106,17 @@ st.markdown(
     header[data-testid="stHeader"] { background:#f4f5fa !important; }
     .block-container { padding-top:1.5rem; padding-bottom:3rem; max-width:1100px; }
 
+    /* Streamlit fades each element in on mount; on a full-page rerun that
+       can leave lower elements visibly translucent for a moment. Kill that
+       specific transition so content renders at full opacity immediately. */
+    [data-testid="stAppViewContainer"] [data-testid="stVerticalBlock"],
+    [data-testid="stAppViewContainer"] [data-testid="element-container"],
+    [data-testid="stAppViewContainer"] .element-container,
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"],
+    [data-testid="stSidebar"] [data-testid="element-container"] {
+        transition: none !important; opacity: 1 !important;
+    }
+
     section[data-testid="stSidebar"] { background:var(--navy-deep); border-right:1px solid #ffffff10; }
     section[data-testid="stSidebar"] * { color:var(--text-light) !important; }
     .brand { display:flex; align-items:center; gap:10px; padding:6px 4px 22px 4px; font-weight:800; font-size:1.15rem; }
@@ -281,19 +292,29 @@ user = st.session_state.auth_user
 # SIDEBAR NAV
 # ---------------------------------------------------------------------------
 NAV_OPTIONS = ["🖥️  Dashboard", "🩺  Risk check", "📰  News", "💬  Chatbot"]
+
+# A keyed widget (key="nav_radio" below) ignores `index=` on every rerun
+# after the first — it just keeps whatever the user last clicked. So to
+# change pages from a button elsewhere (Start new assessment, Log out),
+# we can't just write st.session_state.page; we have to write directly
+# into st.session_state["nav_radio"] itself, and that write has to happen
+# *before* st.radio(key="nav_radio") runs in this script pass. This flag
+# is how other code "requests" a page change that takes effect next run.
+if "pending_nav" in st.session_state:
+    st.session_state["nav_radio"] = st.session_state.pop("pending_nav")
+
 with st.sidebar:
     st.markdown('<div class="brand"><span>🧠</span> NeuroGuard AI</div>', unsafe_allow_html=True)
-    if "page" not in st.session_state:
-        st.session_state.page = NAV_OPTIONS[0]
+    if "nav_radio" not in st.session_state:
+        st.session_state["nav_radio"] = NAV_OPTIONS[0]
     st.session_state.page = st.radio(
-        "nav", NAV_OPTIONS, index=NAV_OPTIONS.index(st.session_state.page),
-        label_visibility="collapsed", key="nav_radio",
+        "nav", NAV_OPTIONS, label_visibility="collapsed", key="nav_radio",
     )
     st.markdown("---")
     st.caption(f"Logged in as **{user['username']}**")
     if st.button("Log out", key="logout_btn", use_container_width=True):
         st.session_state.auth_user = None
-        st.session_state.page = NAV_OPTIONS[0]
+        st.session_state.pending_nav = NAV_OPTIONS[0]
         for k in ("messages", "chat_primed"):
             st.session_state.pop(k, None)
         st.rerun()
@@ -335,7 +356,7 @@ if st.session_state.page == NAV_OPTIONS[0]:
         unsafe_allow_html=True,
     )
     if st.button("✨ Start new assessment", key="start_assessment_btn"):
-        st.session_state.page = NAV_OPTIONS[1]
+        st.session_state.pending_nav = NAV_OPTIONS[1]
         st.rerun()
 
     if model_error:
