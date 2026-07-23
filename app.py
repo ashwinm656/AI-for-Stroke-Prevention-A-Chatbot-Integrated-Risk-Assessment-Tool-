@@ -202,6 +202,14 @@ st.markdown(
         background:#e39a2c; color:#241505;
     }
 
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button {
+        background:#ffffff14 !important; color:var(--text-light) !important;
+        border:1px solid #ffffff22 !important; font-weight:600;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stButton"] button:hover {
+        background:#ffffff26 !important; border:1px solid #ffffff33 !important;
+    }
+
     .auth-wrap { max-width:420px; margin:60px auto 0 auto; }
     .auth-brand { text-align:center; color:#fff; font-weight:800; font-size:1.6rem; margin-bottom:28px; }
     </style>
@@ -335,7 +343,7 @@ with st.sidebar:
     if st.button("Log out", key="logout_btn", use_container_width=True):
         st.session_state.auth_user = None
         st.session_state.pending_nav = NAV_OPTIONS[0]
-        for k in ("messages", "chat_primed"):
+        for k in ("messages",):
             st.session_state.pop(k, None)
         st.rerun()
     st.markdown("---")
@@ -569,31 +577,30 @@ elif st.session_state.page == NAV_OPTIONS[2]:
 elif st.session_state.page == NAV_OPTIONS[3]:
     st.markdown('<div class="hero"><h1>Chat with Stroke Assistant</h1><div class="hero-icon">💬</div></div>', unsafe_allow_html=True)
 
-    hf_email = st.secrets.get("HF_EMAIL", "") if hasattr(st, "secrets") else ""
-    hf_pass = st.secrets.get("HF_PASS", "") if hasattr(st, "secrets") else ""
+    hf_token = st.secrets.get("HF_TOKEN", "") if hasattr(st, "secrets") else ""
 
-    if not hf_email or not hf_pass:
+    if not hf_token:
         st.warning(
-            "Chatbot credentials aren't configured. Add `HF_EMAIL` and `HF_PASS` to "
-            "`.streamlit/secrets.toml` locally, or to your app's Secrets in Streamlit Cloud — "
-            "**don't hardcode them in app.py**, especially since this is going in a public repo."
+            "Chatbot isn't configured. Add `HF_TOKEN` — a Hugging Face access token from "
+            "[huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) (a **Read** token "
+            "is enough) — to `.streamlit/secrets.toml` locally, or to your app's Secrets in Streamlit Cloud."
         )
     else:
-        from hugchat import hugchat
-        from hugchat.login import Login
+        from huggingface_hub import InferenceClient
 
-        BASE_PROMPT = "Hello, I would like to ask about stroke prevention and symptoms. "
+        CHAT_MODEL = "openai/gpt-oss-120b"  # swap this if it ever becomes unavailable
+        SYSTEM_PROMPT = (
+            "You are a helpful assistant answering questions about stroke prevention, symptoms, "
+            "and risk factors. Keep answers concise and clear. You are not a substitute for "
+            "professional medical advice, and you should say so if someone describes an emergency."
+        )
 
         @st.cache_resource
-        def get_chatbot():
-            sign = Login(hf_email, hf_pass)
-            cookies = sign.login()
-            return hugchat.ChatBot(cookies=cookies.get_dict())
+        def get_client(token):
+            return InferenceClient(token=token)
 
         if "messages" not in st.session_state:
             st.session_state.messages = [{"role": "assistant", "content": "Hi! How may I help you regarding stroke?"}]
-        if "chat_primed" not in st.session_state:
-            st.session_state.chat_primed = False
 
         for m in st.session_state.messages:
             with st.chat_message(m["role"]):
@@ -606,22 +613,22 @@ elif st.session_state.page == NAV_OPTIONS[3]:
             with st.chat_message("assistant"):
                 with st.spinner("Thinking..."):
                     try:
-                        bot = get_chatbot()
-                        full_prompt = prompt if st.session_state.chat_primed else BASE_PROMPT + prompt
-                        st.session_state.chat_primed = True
-                        response = str(bot.chat(full_prompt)).strip("`")
+                        client = get_client(hf_token)
+                        api_messages = [{"role": "system", "content": SYSTEM_PROMPT}] + [
+                            {"role": m["role"], "content": m["content"]} for m in st.session_state.messages
+                        ]
+                        completion = client.chat.completions.create(
+                            model=CHAT_MODEL, messages=api_messages, max_tokens=500,
+                        )
+                        response = completion.choices[0].message.content
                         st.write(response)
                         st.session_state.messages.append({"role": "assistant", "content": response})
                     except Exception as e:
                         st.error(
-                            "The chatbot request failed. This is usually one of:\n\n"
-                            "1. **Your Hugging Face account hasn't accepted HuggingChat's terms** — "
-                            "log into [huggingface.co/chat](https://huggingface.co/chat) in a browser with "
-                            "the same email/password once, accept any ToS/model prompts, then try again here.\n"
-                            "2. **Wrong credentials** — double-check `HF_EMAIL`/`HF_PASS` in your secrets "
-                            "match an account that can log into huggingface.co/chat normally.\n"
-                            "3. **Hugging Face changed something** — `hugchat` is an unofficial client that "
-                            "reverse-engineers the HuggingChat web UI, so it can break whenever HF updates "
-                            "their site, independent of anything in this app.\n\n"
+                            "The chatbot request failed. Likely causes:\n\n"
+                            "1. **Invalid or expired `HF_TOKEN`** — generate a fresh one at "
+                            "huggingface.co/settings/tokens (Read access is enough).\n"
+                            f"2. **The model `{CHAT_MODEL}` isn't available right now** — try again shortly, "
+                            "or swap `CHAT_MODEL` in `app.py` for another chat model from the Hugging Face Hub.\n\n"
                             f"Raw error: `{e}`"
                         )
